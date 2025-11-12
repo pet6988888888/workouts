@@ -22,6 +22,20 @@
         .progress-circle {
             transition: stroke-dashoffset 1s linear;
         }
+        /* Style for the big timer display to ensure font size consistency */
+        .big-timer {
+            font-size: 4rem; /* Standard size for MM:SS or SS */
+        }
+        /* Adjust for seconds-only display to be even bigger */
+        .big-timer.seconds-only {
+            font-size: 6rem;
+        }
+
+        @media (min-width: 1024px) {
+            .big-timer.seconds-only {
+                font-size: 8rem;
+            }
+        }
     </style>
 </head>
 <body>
@@ -39,6 +53,7 @@
             Group: "https://placehold.co/32x32/059669/111827?text=GRP", 
         };
 
+        // NOTE: A placeholder URL is used for a generic video since external assets are not portable.
         const DEMO_VIDEO_URL = "https://www.w3schools.com/html/mov_bbb.mp4";
 
         const WORKOUTS = [
@@ -118,6 +133,7 @@
         let view = 'groupList'; // 'groupList' | 'workoutList' | 'detail' | 'player' | 'complete'
         let selectedWorkoutId = null;
         let selectedGroupName = null;
+        let selectedRounds = 1; 
 
         // Workout Player State
         let preWorkoutCountdown = 10;
@@ -128,17 +144,30 @@
         let timerInterval = null;
         let introInterval = null;
         let audioContext = null;
+        let currentWorkoutSteps = []; 
+        let totalTimeLeft = 0; // NEW: Total seconds remaining in the entire workout (Countdown)
+        let initialTotalDuration = 0; // NEW: Total planned duration for completion screen
 
         // --- Utility Functions ---
 
-        /** Helper to convert seconds to MM:SS or SS format. */
+        /** Helper to convert seconds to MM:SS format. */
         const formatTime = (seconds) => {
-            if (seconds >= 60) {
-                const mins = Math.floor(seconds / 60);
-                const secs = seconds % 60;
-                return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        };
+
+        /** * Formats the main timer.
+         * Shows SS if under 60s, MM:SS otherwise. 
+         */
+        const formatBigTimer = (seconds) => {
+            if (seconds < 60) {
+                return seconds.toString().padStart(2, '0'); // Just seconds (e.g., "30")
             }
-            return seconds.toString();
+            // Use standard MM:SS format for 60 seconds or more
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         };
 
         /** Initialises the AudioContext for sound effects. */
@@ -179,6 +208,35 @@
             }
         };
 
+        /** Generates the full sequence of steps based on exercises and selected rounds. */
+        const getWorkoutSteps = (exercises, rounds) => {
+            let expandedSteps = [];
+            let totalDuration = 0;
+            const restDuration = 60; // 60s transition rest between rounds
+
+            for (let r = 0; r < rounds; r++) {
+                // Add the core exercises for the round
+                expandedSteps.push(...exercises.map(step => {
+                    totalDuration += step.duration;
+                    return { ...step, round: r + 1, isCore: true };
+                }));
+                
+                // Add a transition rest if it's not the final round
+                if (r < rounds - 1) {
+                     expandedSteps.push({ 
+                         name: `Round ${r + 1} Complete - Take a ${restDuration}s Break`, 
+                         duration: restDuration, 
+                         type: 'transition',
+                         videoUrl: null,
+                         round: r + 1,
+                         isCore: false
+                     });
+                     totalDuration += restDuration;
+                }
+            }
+            return { expandedSteps, totalDuration };
+        };
+
         // --- Navigation and Main Renderer ---
 
         /** Updates the view state and re-renders the application. */
@@ -197,13 +255,20 @@
                 selectedGroupName = params.groupName;
             } else if (newView === 'detail') {
                 selectedWorkoutId = params.workoutId;
+                selectedRounds = 1; // Reset rounds when viewing details
             } else if (newView === 'player') {
                 // Initialize player state
                 const workout = WORKOUTS.find(w => w.id === selectedWorkoutId);
+                const result = getWorkoutSteps(workout.exercises, selectedRounds);
+                
+                currentWorkoutSteps = result.expandedSteps; 
+                initialTotalDuration = result.totalDuration; // Store total duration for completion screen
+                totalTimeLeft = result.totalDuration; // Start total countdown here
+                
                 currentStepIndex = 0;
                 preWorkoutCountdown = 10;
-                timeLeft = workout.exercises[0].duration;
-                initialTime = workout.exercises[0].duration;
+                timeLeft = currentWorkoutSteps[0].duration;
+                initialTime = currentWorkoutSteps[0].duration;
                 isRunning = false;
                 initAudioContext();
             }
@@ -335,8 +400,7 @@
                             <h2 class="text-xl font-bold text-white">${workout.name}</h2>
                             <p class="text-sm text-gray-300 mt-1">${workout.target}</p>
                             <p class="text-sm font-semibold text-indigo-400 flex items-center mt-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                ${workout.duration}
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${workout.duration}
                             </p>
                         </div>
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-gray-500 rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
@@ -354,6 +418,16 @@
 
             const iconUrl = ICON_URLS[workout.icon];
 
+            // Calculate total time for one round
+            const oneRoundTime = workout.exercises.reduce((sum, step) => sum + step.duration, 0);
+
+            // Function to calculate estimated total time based on rounds (including round transition rest)
+            const getEstimatedTime = (rounds) => {
+                const totalExerciseTime = oneRoundTime * rounds;
+                const totalTransitionRest = (rounds > 1 ? rounds - 1 : 0) * 60; // 60s rest between rounds
+                return formatTime(totalExerciseTime + totalTransitionRest);
+            };
+
             const html = `
                 <div class="min-h-screen bg-gray-900 text-gray-100 flex flex-col p-4">
                     <div class="flex items-center justify-start mb-6">
@@ -366,14 +440,26 @@
                         <div class="flex items-center justify-between mb-4">
                             <img src="${iconUrl}" alt="${workout.icon}" class="w-10 h-10 object-contain text-indigo-400" />
                             <p class="text-sm font-semibold text-gray-400 flex items-center">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${workout.duration}
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${getEstimatedTime(selectedRounds)} Total
                             </p>
                         </div>
                         <h1 class="text-3xl font-extrabold text-white mb-1">${workout.name}</h1>
                         <p class="text-md text-gray-300 italic">Target: ${workout.target}</p>
+                        
+                        <!-- Rounds Selector -->
+                        <div class="mt-4 pt-4 border-t border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                            <label for="rounds-selector" class="text-sm font-semibold text-gray-400 mb-2 sm:mb-0">Select Rounds:</label>
+                            <select id="rounds-selector" class="bg-gray-700 text-white p-2 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition-colors cursor-pointer">
+                                <option value="1">1 Round (${getEstimatedTime(1)})</option>
+                                <option value="2">2 Rounds (${getEstimatedTime(2)})</option>
+                                <option value="3">3 Rounds (${getEstimatedTime(3)})</option>
+                                <option value="4">4 Rounds (${getEstimatedTime(4)})</option>
+                                <option value="5">5 Rounds (${getEstimatedTime(5)})</option>
+                            </select>
+                        </div>
                     </div>
 
-                    <h2 class="text-xl font-bold text-white mb-3 border-b border-gray-700 pb-2">Workout Steps</h2>
+                    <h2 class="text-xl font-bold text-white mb-3 border-b border-gray-700 pb-2">Exercises (Per Round)</h2>
                     <div class="space-y-3 flex-grow overflow-y-auto pb-20" id="exercise-list">
                         <!-- Exercises populated here -->
                     </div>
@@ -388,7 +474,20 @@
             container.innerHTML = html;
 
             document.getElementById('back-to-workouts').addEventListener('click', () => navigateTo('workoutList', { groupName: workout.group }));
-            document.getElementById('start-workout-btn').addEventListener('click', () => navigateTo('player'));
+            
+            const roundsSelector = document.getElementById('rounds-selector');
+            roundsSelector.value = selectedRounds; // Set the current round value
+            roundsSelector.addEventListener('change', (e) => {
+                selectedRounds = parseInt(e.target.value, 10);
+                // Update the estimated time display dynamically (requires a minor DOM manipulation or re-render of the top card)
+                // For simplicity here, we rely on the final selection before starting the workout.
+            });
+
+            document.getElementById('start-workout-btn').addEventListener('click', () => {
+                // Read the final rounds selection before navigation
+                selectedRounds = parseInt(document.getElementById('rounds-selector').value, 10);
+                navigateTo('player');
+            });
 
             const exerciseList = document.getElementById('exercise-list');
             workout.exercises.forEach((step, index) => {
@@ -414,7 +513,7 @@
         /** 4. Workout Player View */
         const renderWorkoutPlayer = (container) => {
             const workout = WORKOUTS.find(w => w.id === selectedWorkoutId);
-            if (!workout) return navigateTo('groupList');
+            if (!workout || currentWorkoutSteps.length === 0) return navigateTo('groupList');
 
             // --- Pre-Workout Countdown Render ---
             if (preWorkoutCountdown > 0) {
@@ -422,7 +521,7 @@
                     <div class="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-4 text-center">
                         <h1 class="text-3xl text-indigo-400 font-semibold mb-8">Get Ready for:</h1>
                         <h2 class="text-6xl font-extrabold text-white mb-12 animate-pulse transition-all duration-500">
-                            ${workout.exercises[0].name}
+                            ${currentWorkoutSteps[0].name}
                         </h2>
                         <div id="countdown-timer" class="text-9xl font-black text-emerald-400 transition-all duration-300">
                             ${preWorkoutCountdown}
@@ -434,6 +533,9 @@
                 `;
                 container.innerHTML = introHtml;
                 document.getElementById('skip-countdown-btn').addEventListener('click', () => {
+                    // Skip to start immediately
+                    if (introInterval) clearInterval(introInterval);
+                    introInterval = null;
                     preWorkoutCountdown = 0;
                     isRunning = true;
                     renderApp(); // Rerender to start the main player
@@ -465,12 +567,22 @@
 
             // --- Main Workout Player Render ---
             const renderPlayerUI = () => {
-                const currentStep = workout.exercises[currentStepIndex];
-                const isLastStep = currentStepIndex === workout.exercises.length - 1;
-                const nextStep = !isLastStep ? workout.exercises[currentStepIndex + 1] : null;
-                const totalSteps = workout.exercises.length;
-                const typeColorClass = currentStep.type === 'exercise' ? 'bg-emerald-600' : 'bg-rose-500';
+                const currentStep = currentWorkoutSteps[currentStepIndex];
+                const isLastStep = currentStepIndex === currentWorkoutSteps.length - 1;
+                const nextStep = !isLastStep ? currentWorkoutSteps[currentStepIndex + 1] : null;
+                const totalSteps = currentWorkoutSteps.length;
 
+                // Color based on step type
+                let typeColorClass = 'bg-gray-700';
+                if (currentStep.type === 'exercise') {
+                    typeColorClass = 'bg-emerald-600';
+                } else if (currentStep.type === 'rest') {
+                    typeColorClass = 'bg-rose-500';
+                } else if (currentStep.type === 'transition') {
+                     typeColorClass = 'bg-indigo-600';
+                }
+
+                // Calculate progress for the circular timer
                 const timerProgress = initialTime > 0 ? (timeLeft / initialTime) * 100 : 0;
                 const circumference = 2 * Math.PI * 45;
                 const dashoffset = circumference * (1 - timerProgress / 100);
@@ -485,6 +597,17 @@
                 ` : '';
                 
                 const videoSourceUrl = currentStep.videoUrl || DEMO_VIDEO_URL;
+                
+                // Determine the current round display
+                const currentRoundDisplay = currentStep.round ? 
+                    (currentStep.type === 'transition' ? `Break After Round ${currentStep.round}` : `Round ${currentStep.round} of ${selectedRounds}`)
+                    : 'Warmup';
+
+                // Determine the class for the big timer display (for simplified SS display)
+                // This variable is defined here for the initial render, and its component classes
+                // are reconstructed in updateTimer for every tick.
+                const bigTimerClass = `big-timer font-black text-white ${timeLeft < 60 ? 'seconds-only' : ''}`;
+
 
                 const playerHtml = `
                     <div class="min-h-screen bg-gray-900 text-gray-100 flex flex-col p-4">
@@ -493,7 +616,13 @@
                             <button id="player-back-btn" class="flex items-center text-indigo-400 hover:text-indigo-300 font-medium">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg> Back
                             </button>
-                            <h1 class="text-xl font-bold text-white truncate">${workout.name}</h1>
+                            <h1 class="text-xl font-bold text-white truncate">${workout.name} (${selectedRounds} Rds)</h1>
+                            
+                             <!-- Total Time LEFT Display -->
+                            <div class="text-right">
+                                <p class="text-xs text-gray-400 uppercase tracking-wider">Total Time Left</p>
+                                <p id="total-time-display" class="text-lg font-bold text-white">${formatTime(totalTimeLeft)}</p>
+                            </div>
                         </div>
 
                         <div class="flex-1 flex flex-col lg:grid lg:grid-cols-2 lg:gap-8">
@@ -515,9 +644,10 @@
 
                                 <div id="current-step-card" class="mt-6 lg:mt-4 p-4 rounded-xl shadow-lg text-white text-center ${typeColorClass} transition-colors duration-300">
                                     <div class="text-sm font-light uppercase tracking-widest opacity-80">
-                                        ${currentStep.type === 'exercise' ? 'CURRENT EXERCISE' : 'RESTING'}
+                                        ${currentStep.type === 'exercise' ? 'CURRENT EXERCISE' : 'BREAK TIME'}
                                     </div>
                                     <h2 class="text-4xl font-extrabold mt-1 mb-2">${currentStep.name}</h2>
+                                    <p class="text-xs font-semibold text-white/70">${currentRoundDisplay}</p>
                                 </div>
 
                                 ${nextUpHtml}
@@ -526,8 +656,8 @@
                             <div class="flex flex-col justify-between pt-6 lg:pt-0">
                                 <div class="lg:order-1">
                                     <div class="text-sm text-gray-400 flex justify-between">
-                                        <span id="step-count">${currentStepIndex + 1} of ${totalSteps}</span>
-                                        <span id="step-type" class="font-medium">${currentStep.type === 'exercise' ? 'WORK' : 'REST'}</span>
+                                        <span id="step-count">Step ${currentStepIndex + 1} of ${totalSteps}</span>
+                                        <span id="step-type" class="font-medium uppercase">${currentStep.type}</span>
                                     </div>
                                     <div class="w-full h-2 bg-gray-700 rounded-full mt-1">
                                         <div id="overall-progress"
@@ -548,11 +678,11 @@
                                                 stroke-dasharray="${circumference}"
                                                 stroke-dashoffset="${dashoffset}"
                                                 id="timer-progress-circle"
-                                                class="progress-circle ${currentStep.type === 'exercise' ? 'stroke-emerald-400' : 'stroke-rose-400'}"
+                                                class="progress-circle ${currentStep.type === 'exercise' ? 'stroke-emerald-400' : (currentStep.type === 'rest' ? 'stroke-rose-400' : 'stroke-indigo-400')}"
                                                 transform="rotate(-90 50 50)"
                                             />
                                         </svg>
-                                        <p id="timer-display" class="relative text-6xl font-black text-white">${formatTime(timeLeft)}</p>
+                                        <p id="timer-display" class="relative ${bigTimerClass}">${formatBigTimer(timeLeft)}</p>
                                     </div>
                                 </div>
 
@@ -594,10 +724,16 @@
             const updateTimer = () => {
                 if (!isRunning) return;
 
+                // 1. Update total time remaining
+                totalTimeLeft--;
+                const totalTimeDisplay = document.getElementById('total-time-display');
+                if (totalTimeDisplay) totalTimeDisplay.textContent = formatTime(totalTimeLeft);
+
+                // 2. Update current step time
                 timeLeft--;
 
-                const currentStep = workout.exercises[currentStepIndex];
-                const isLastStep = currentStepIndex === workout.exercises.length - 1;
+                const currentStep = currentWorkoutSteps[currentStepIndex];
+                const isLastStep = currentStepIndex === currentWorkoutSteps.length - 1;
                 
                 // Sound effects for last 3 seconds
                 if (timeLeft >= 1 && timeLeft <= 3) {
@@ -611,14 +747,14 @@
                     if (!isLastStep) {
                         playTone(880, 0.2); // Transition tone
                         currentStepIndex++;
-                        const nextStep = workout.exercises[currentStepIndex];
+                        const nextStep = currentWorkoutSteps[currentStepIndex];
                         timeLeft = nextStep.duration;
                         initialTime = nextStep.duration;
                         
                         // Restart timer loop immediately after updating state
                         timerInterval = setInterval(updateTimer, 1000); 
 
-                        // Re-render UI to update all content (step name, color, video)
+                        // Re-render UI to update all content (step name, color, video, timers)
                         renderPlayerUI(); 
                     } else {
                         // Workout Finished
@@ -629,7 +765,15 @@
                 } else {
                     // Update only the display elements
                     const timerDisplay = document.getElementById('timer-display');
-                    if (timerDisplay) timerDisplay.textContent = formatTime(timeLeft);
+                    if (timerDisplay) {
+                        // FIX: Reconstruct bigTimerClass here since it was not defined in this function's scope
+                        const dynamicClass = timeLeft < 60 ? 'seconds-only' : '';
+                        const staticClass = 'big-timer font-black text-white';
+                        
+                        // Apply the new simplified format and class
+                        timerDisplay.textContent = formatBigTimer(timeLeft);
+                        timerDisplay.className = `relative ${staticClass} ${dynamicClass}`;
+                    }
                     
                     const timerProgressCircle = document.getElementById('timer-progress-circle');
                     if (timerProgressCircle) {
@@ -641,16 +785,20 @@
             };
 
             const handleSkip = () => {
-                const isLastStep = currentStepIndex === workout.exercises.length - 1;
+                const isLastStep = currentStepIndex === currentWorkoutSteps.length - 1;
                 if (isLastStep) {
                     return navigateTo('complete', { workoutId: selectedWorkoutId });
                 }
+
+                // Deduct remaining time from the total countdown before skipping
+                totalTimeLeft -= timeLeft; 
+                if (totalTimeLeft < 0) totalTimeLeft = 0;
 
                 if (timerInterval) clearInterval(timerInterval);
                 timerInterval = null;
 
                 currentStepIndex++;
-                const nextStep = workout.exercises[currentStepIndex];
+                const nextStep = currentWorkoutSteps[currentStepIndex];
                 timeLeft = nextStep.duration;
                 initialTime = nextStep.duration;
                 isRunning = true;
@@ -668,12 +816,16 @@
             const workout = WORKOUTS.find(w => w.id === selectedWorkoutId);
             if (!workout) return navigateTo('groupList');
 
+            // The actual time taken is the initial planned duration, as the timer should reach 0
+            const finalTimeDisplay = formatTime(initialTotalDuration);
+
             const html = `
                 <div class="min-h-screen bg-indigo-800 flex flex-col items-center justify-center p-6 text-white text-center">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-24 h-24 text-emerald-300 mb-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     <h1 class="text-4xl font-extrabold mb-3">Workout Complete!</h1>
-                    <p class="text-xl font-semibold mb-2">${workout.name}</p>
-                    <p class="text-indigo-200 mb-10">You crushed your ${workout.duration} session. Great job!</p>
+                    <p class="text-xl font-semibold mb-2">${workout.name} (${selectedRounds} Rounds)</p>
+                    <p class="text-indigo-200 mb-2">Total workout time: <span class="font-bold text-emerald-300">${finalTimeDisplay}</span></p>
+                    <p class="text-indigo-200 mb-10">You crushed your session. Great job!</p>
                     <button id="go-home-btn" class="bg-white text-indigo-700 p-4 rounded-full text-lg font-bold shadow-lg hover:bg-indigo-50 transition-colors flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> Go to Workouts
                     </button>
