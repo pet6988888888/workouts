@@ -23,17 +23,19 @@
             transition: stroke-dashoffset 1s linear;
         }
         /* Style for the big timer display to ensure font size consistency */
+        /* Reduced by ~25% from previous sizes (4rem -> 3rem) */
         .big-timer {
-            font-size: 4rem; /* Standard size for MM:SS or SS */
+            font-size: 3rem; 
         }
-        /* Adjust for seconds-only display to be even bigger */
+        /* Adjust for seconds-only display to be even bigger (6rem -> 4.5rem) */
         .big-timer.seconds-only {
-            font-size: 6rem;
+            font-size: 4.5rem;
         }
 
         @media (min-width: 1024px) {
+            /* Desktop/Large screen adjustment (8rem -> 6rem) */
             .big-timer.seconds-only {
-                font-size: 8rem;
+                font-size: 6rem;
             }
         }
     </style>
@@ -145,8 +147,13 @@
         let introInterval = null;
         let audioContext = null;
         let currentWorkoutSteps = []; 
-        let totalTimeLeft = 0; // NEW: Total seconds remaining in the entire workout (Countdown)
-        let initialTotalDuration = 0; // NEW: Total planned duration for completion screen
+        let totalTimeLeft = 0; 
+        let initialTotalDuration = 0; 
+
+        // Metrics for Completion Screen (NEW)
+        let totalExerciseTime = 0; // Total active time (type: 'exercise')
+        let totalRestTime = 0;     // Total rest/transition time (type: 'rest' or 'transition')
+
 
         // --- Utility Functions ---
 
@@ -212,12 +219,19 @@
         const getWorkoutSteps = (exercises, rounds) => {
             let expandedSteps = [];
             let totalDuration = 0;
+            let totalExerciseTime = 0; // NEW: Track active time
+            let totalRestTime = 0;     // NEW: Track rest time
             const restDuration = 60; // 60s transition rest between rounds
 
             for (let r = 0; r < rounds; r++) {
                 // Add the core exercises for the round
                 expandedSteps.push(...exercises.map(step => {
                     totalDuration += step.duration;
+                    if (step.type === 'exercise') {
+                        totalExerciseTime += step.duration;
+                    } else if (step.type === 'rest') {
+                        totalRestTime += step.duration;
+                    }
                     return { ...step, round: r + 1, isCore: true };
                 }));
                 
@@ -232,9 +246,11 @@
                          isCore: false
                      });
                      totalDuration += restDuration;
+                     totalRestTime += restDuration; // Track transition rest
                 }
             }
-            return { expandedSteps, totalDuration };
+            // Return all calculated metrics
+            return { expandedSteps, totalDuration, totalExerciseTime, totalRestTime };
         };
 
         // --- Navigation and Main Renderer ---
@@ -262,8 +278,12 @@
                 const result = getWorkoutSteps(workout.exercises, selectedRounds);
                 
                 currentWorkoutSteps = result.expandedSteps; 
-                initialTotalDuration = result.totalDuration; // Store total duration for completion screen
-                totalTimeLeft = result.totalDuration; // Start total countdown here
+                initialTotalDuration = result.totalDuration; 
+                totalTimeLeft = result.totalDuration; 
+                
+                // Store completion metrics (NEW)
+                totalExerciseTime = result.totalExerciseTime;
+                totalRestTime = result.totalRestTime;
                 
                 currentStepIndex = 0;
                 preWorkoutCountdown = 10;
@@ -403,7 +423,7 @@
                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-1 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${workout.duration}
                             </p>
                         </div>
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-gray-500 rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-gray-500 rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18-6-6 6-6"/></svg>
                     </div>
                 `;
                 button.addEventListener('click', () => navigateTo('detail', { workoutId: workout.id }));
@@ -479,8 +499,6 @@
             roundsSelector.value = selectedRounds; // Set the current round value
             roundsSelector.addEventListener('change', (e) => {
                 selectedRounds = parseInt(e.target.value, 10);
-                // Update the estimated time display dynamically (requires a minor DOM manipulation or re-render of the top card)
-                // For simplicity here, we rely on the final selection before starting the workout.
             });
 
             document.getElementById('start-workout-btn').addEventListener('click', () => {
@@ -604,8 +622,6 @@
                     : 'Warmup';
 
                 // Determine the class for the big timer display (for simplified SS display)
-                // This variable is defined here for the initial render, and its component classes
-                // are reconstructed in updateTimer for every tick.
                 const bigTimerClass = `big-timer font-black text-white ${timeLeft < 60 ? 'seconds-only' : ''}`;
 
 
@@ -766,7 +782,7 @@
                     // Update only the display elements
                     const timerDisplay = document.getElementById('timer-display');
                     if (timerDisplay) {
-                        // FIX: Reconstruct bigTimerClass here since it was not defined in this function's scope
+                        // Reconstruct dynamic class based on current time
                         const dynamicClass = timeLeft < 60 ? 'seconds-only' : '';
                         const staticClass = 'big-timer font-black text-white';
                         
@@ -816,17 +832,61 @@
             const workout = WORKOUTS.find(w => w.id === selectedWorkoutId);
             if (!workout) return navigateTo('groupList');
 
-            // The actual time taken is the initial planned duration, as the timer should reach 0
+            // Hardcoded positive messages (NEW)
+            const POSITIVE_MESSAGES = [
+                "WELL DONE ON COMPLETING THE WORKOUT!",
+                "YOU CRUSHED IT! WHAT A PERFORMANCE!",
+                "FANTASTIC EFFORT! THAT'S ANOTHER ONE DONE.",
+                "MUSCLES MADE, STRESS RELIEVED. GREAT JOB!",
+                "CONSISTENCY IS KEY. KEEP UP THE AMAZING WORK!",
+                "YOU DID IT! FEEL THAT ENDORPHIN RUSH!",
+                "POWERFUL PERFORMANCE. YOU ARE UNSTOPPABLE!",
+                "EVERY REP COUNTS. WONDERFUL JOB FINISHING!",
+                "YOU EARNED THAT! CELEBRATE YOUR STRENGTH.",
+                "GOALS ACHIEVED! BE PROUD OF YOUR EFFORT."
+            ];
+            const randomMessage = POSITIVE_MESSAGES[Math.floor(Math.random() * POSITIVE_MESSAGES.length)];
+
+            // Retrieve stored metrics (NEW)
             const finalTimeDisplay = formatTime(initialTotalDuration);
+            const activeTimeDisplay = formatTime(totalExerciseTime);
+            const restTimeDisplay = formatTime(totalRestTime);
+
 
             const html = `
-                <div class="min-h-screen bg-indigo-800 flex flex-col items-center justify-center p-6 text-white text-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="w-24 h-24 text-emerald-300 mb-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    <h1 class="text-4xl font-extrabold mb-3">Workout Complete!</h1>
-                    <p class="text-xl font-semibold mb-2">${workout.name} (${selectedRounds} Rounds)</p>
-                    <p class="text-indigo-200 mb-2">Total workout time: <span class="font-bold text-emerald-300">${finalTimeDisplay}</span></p>
-                    <p class="text-indigo-200 mb-10">You crushed your session. Great job!</p>
-                    <button id="go-home-btn" class="bg-white text-indigo-700 p-4 rounded-full text-lg font-bold shadow-lg hover:bg-indigo-50 transition-colors flex items-center">
+                <div class="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 text-white text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-24 h-24 text-emerald-400 mb-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    
+                    <h1 class="text-4xl font-extrabold mb-8 uppercase text-emerald-400">
+                        ${randomMessage}
+                    </h1>
+
+                    <p class="text-xl font-semibold mb-2 text-gray-200">${workout.name}</p>
+                    
+                    <!-- Metrics Breakdown (Updated to Gray Theme) -->
+                    <div class="bg-gray-800 p-6 rounded-xl w-full max-w-sm shadow-xl mt-4 mb-10 border border-gray-700">
+                        <h2 class="text-lg font-bold border-b border-gray-700 pb-2 mb-4 text-left text-indigo-400">Your Session Summary:</h2>
+                        <div class="space-y-3 text-left">
+                            <div class="flex justify-between items-center text-lg">
+                                <span class="font-medium">Total Duration:</span>
+                                <span class="font-bold text-emerald-400">${finalTimeDisplay}</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-md text-gray-400">Time Exercising:</span>
+                                <span class="font-bold">${activeTimeDisplay}</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-md text-gray-400">Time Resting:</span>
+                                <span class="font-bold">${restTimeDisplay}</span>
+                            </div>
+                            <div class="flex justify-between items-center border-t border-gray-700 pt-3 mt-3">
+                                <span class="font-medium">Rounds Completed:</span>
+                                <span class="text-xl font-extrabold text-emerald-400">${selectedRounds}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button id="go-home-btn" class="bg-indigo-600 text-white p-4 rounded-xl text-lg font-bold shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 transition-colors flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> Go to Workouts
                     </button>
                 </div>
